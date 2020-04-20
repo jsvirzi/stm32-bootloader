@@ -38,16 +38,12 @@ uint32_t atoh(const char *s) {
 #define DataRecord (0x00)
 #define ExtendedLinearAddressRecord (0x04)
 
-void copy_record(BootloaderRecord *dst, BootloaderRecord *src) {
-    dst->base_address = src->base_address;
-
-    if (dst->base_address == 0x00008d00) {
-        int x = 5;
-    }
-
-    dst->segment_address = src->segment_address;
+/* final records use the following fields: address, size, payload, checksum */
+void make_final_record(BootloaderRecord *dst, BootloaderRecord *src) {
+    bzero(dst, sizeof(BootloaderRecord));
+    dst->usage = BootloaderRecordUsageFinal;
+    dst->address = src->base_address;
     dst->size = src->size;
-    dst->type = src->type;
     /* N corresponding to N+1 bytes of payload */
     dst->checksum = src->size - 1;
     for (int i = 0; i < src->size; ++i) { dst->checksum = dst->checksum ^ src->payload[i]; }
@@ -69,9 +65,9 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
     char *line = NULL;
     size_t len = 0;
     ssize_t nread;
-    memset(record, 0, sizeof(BootloaderRecord));
-    int errors = 0, new_record = 0;
-    while ((new_record == 0) && (nread = getline(&line, &len, fp)) != -1) {
+    int errors = 0;
+    record->usage = BootloaderRecordUsageWork;
+    while ((record->usage != BootloaderRecordUsageFinal) && (nread = getline(&line, &len, fp)) != -1) {
 
         int idx = 0;
 
@@ -90,10 +86,10 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
         gp_string[2] = line[idx++];
         gp_string[3] = line[idx++];
         gp_string[4] = 0;
-        uint32_t base_address = atoh(gp_string);
+        uint32_t address = atoh(gp_string);
 
-        calc_checksum += (base_address >> 0) & 0xff;
-        calc_checksum += (base_address >> 8) & 0xff;
+        calc_checksum += (address >> 0) & 0xff;
+        calc_checksum += (address >> 8) & 0xff;
 
         gp_string[0] = line[idx++];
         gp_string[1] = line[idx++];
@@ -103,14 +99,19 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
         calc_checksum += (type & 0xff);
 
         if (type == DataRecord) {
-            if ((work_record->base_address == 0) && (work_record->size == 0)) {
-                work_record->base_address = base_address; /* just starting off. this will happen only once at beginning */
-            } else if ((base_address != (work_record->base_address + work_record->size)) && (new_record == 0)) {
+            uint32_t effective_address = work_record->segment_address + address;
+            if (work_record->size == 0) { /* just starting out with new extended linear address */
+                work_record->base_address = effective_address;
+                work_record->address = work_record->base_address;
+            }
+
+            uint32_t expected_address = effective_address;
+            if (work_record->address != expected_address) {
             /*** we are no longer contiguous, write record and start new one ***/
-                copy_record(record, work_record);
-                work_record->base_address = base_address;
+                make_final_record(record, work_record);
+                work_record->base_address = effective_address;
+                work_record->address = effective_address;
                 work_record->size = 0;
-                new_record = 1;
             }
 
             for (int i = 0; i < record_size; ++i) {
@@ -121,14 +122,17 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
 
                 calc_checksum += (byte & 0xff);
 
-                work_record->payload[work_record->size++] = byte;
-                if ((work_record->size == work_record->max_size) && (new_record == 0)) {
-                    copy_record(record, work_record); /* use record to program new sector of flash */
-                    work_record->base_address += work_record->size; /* update for next iteration */
+                work_record->payload[work_record->size] = byte;
+                ++work_record->size;
+                ++work_record->address;
+                if (work_record->size == work_record->max_size) {
+                    make_final_record(record, work_record); /* use record to program new sector of flash */
+                    work_record->base_address += work_record->size;
                     work_record->size = 0;
-                    new_record = 1;
                 }
             }
+
+            if (record_size != 0) { work_record->dirty = 1; }
 
             /* checksum */
             gp_string[0] = line[idx++];
@@ -138,24 +142,30 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
             uint8_t checksum = (calc_checksum + read_checksum) & 0xff;
             if (checksum != 0) {
                 ++errors;
-                printf("index = %d. length = %zu. checksums = %2.2x / %2.2x %2.2x\n", idx, nread,
+                printf("ERROR: index = %d. length = %zu. checksums = %2.2x / %2.2x %2.2x\n", idx, nread,
                        calc_checksum, read_checksum, checksum);
             }
 
         } else if (type == ExtendedLinearAddressRecord) {
+
+            if (work_record->dirty && (work_record->size != 0)) { /* TODO is dirty and size != 0 the same criteria */
+                make_final_record(record, work_record);
+            }
+
+            work_record->dirty = 0; /* start record in virgin state */
+            work_record->size = 0;
 
             gp_string[0] = line[idx++];
             gp_string[1] = line[idx++];
             gp_string[2] = line[idx++];
             gp_string[3] = line[idx++];
             gp_string[4] = 0;
-            uint32_t base_address = atoh(gp_string);
+            address = atoh(gp_string);
 
-            calc_checksum += ((base_address >> 0) & 0xff);
-            calc_checksum += ((base_address >> 8) & 0xff);
+            calc_checksum += ((address >> 8) & 0xff);
+            calc_checksum += ((address >> 0) & 0xff);
 
-            work_record->segment_address = atoh(gp_string);
-            work_record->segment_address = (work_record->segment_address << 16);
+            work_record->segment_address = (address << 16);
             printf("extended linear address = 0x%8.8x\n", work_record->segment_address);
 
             gp_string[0] = line[idx++];
@@ -167,7 +177,7 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
 
             if (checksum != 0) {
                 ++errors;
-                printf("index = %d. length = %zu. checksums = %2.2x / %2.2x %2.2x\n", idx, nread,
+                printf("ERROR: index = %d. length = %zu. checksums = %2.2x / %2.2x %2.2x\n", idx, nread,
                        calc_checksum, read_checksum, checksum);
             }
 
@@ -178,13 +188,12 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
         }
     }
 
-    if (new_record) {
-        return new_record;
+    if (record->usage == BootloaderRecordUsageFinal) {
+        return 1;
     }
 
     if (work_record->size > 0) {
-        copy_record(record, work_record);
-        work_record->base_address += work_record->size;
+        make_final_record(record, work_record);
         work_record->size = 0;
         return 1;
     }

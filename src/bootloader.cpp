@@ -356,15 +356,15 @@ int main(int argc, char **argv) {
     while (hexreader_next(fp, &work_record, &record)) {
 
         int status;
-        uint8_t record_address[5]; /* 4 bytes + checksum */
-        uint32_t address = record.segment_address + record.base_address;
 
-        static uint8_t TODO_debug[32];
-        status = bootloader.read_memory(&bootloader, address, TODO_debug, sizeof(TODO_debug));
-
-        status = bootloader.write_memory(&bootloader, address, record.payload, record.size);
+        static uint8_t TODO_debug[128];
+        status = bootloader.read_memory(&bootloader, record.address, TODO_debug, sizeof(TODO_debug));
+        status = bootloader.write_memory(&bootloader, record.address, record.payload, record.size);
 
 #if 0
+
+        uint8_t record_address[5]; /* 4 bytes + checksum */
+        uint32_t address = record.segment_address + record.base_address;
 
         record_address[0] = (address >> 0x18) & 0xff;
         record_address[1] = (address >> 0x10) & 0xff;

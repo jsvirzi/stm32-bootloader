@@ -4,14 +4,23 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#define MaxRecordSize (256)
+
+enum {
+    BootloaderRecordUsageWork = 0,
+    BootloaderRecordUsageFinal,
+    BootloaderRecordUsages
+};
+
 #pragma pack(1)
 typedef struct BootloaderRecord {
     uint32_t segment_address;
     uint32_t base_address;
+    uint32_t address; /* final address */
     uint16_t size;
     uint16_t max_size;
-    uint8_t type, checksum;
-    uint8_t payload[256];
+    uint8_t type, checksum, dirty, usage;
+    uint8_t payload[MaxRecordSize];
 } BootloaderRecord;
 
 FILE *hexreader_init(const char *ifile);
