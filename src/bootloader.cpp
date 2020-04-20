@@ -175,6 +175,7 @@ static int extended_erase(Bootloader *bootloader, unsigned int start_page, unsig
 static int mass_erase(Bootloader *bootloader);
 static int extended_mass_erase(Bootloader *bootloader, int bank);
 static int read_memory(Bootloader *bootloader, uint32_t address, uint8_t *buff, unsigned int n_bytes);
+static int write_memory(Bootloader *bootloader, uint32_t address, uint8_t *buff, unsigned int n_bytes);
 
 int initialize_bootloader(Bootloader *bootloader) {
 /* this is where there is a platform-dependent port */
@@ -192,6 +193,7 @@ int initialize_bootloader(Bootloader *bootloader) {
     bootloader->erase = erase;
     bootloader->extended_erase = extended_erase;
     bootloader->read_memory = read_memory;
+    bootloader->write_memory = write_memory;
     return EXIT_SUCCESS;
 }
 
@@ -352,8 +354,18 @@ int main(int argc, char **argv) {
 
     FILE *fp = hexreader_init(hex_filename);
     while (hexreader_next(fp, &work_record, &record)) {
+
+        int status;
         uint8_t record_address[5]; /* 4 bytes + checksum */
         uint32_t address = record.segment_address + record.base_address;
+
+        static uint8_t TODO_debug[32];
+        status = bootloader.read_memory(&bootloader, address, TODO_debug, sizeof(TODO_debug));
+
+        status = bootloader.write_memory(&bootloader, address, record.payload, record.size);
+
+#if 0
+
         record_address[0] = (address >> 0x18) & 0xff;
         record_address[1] = (address >> 0x10) & 0xff;
         record_address[2] = (address >> 0x08) & 0xff;
@@ -426,6 +438,9 @@ int main(int argc, char **argv) {
         }
 
         if (checksum) { return EXIT_FAILURE; }
+
+#endif
+
     }
 
     if (go_address != InvalidAddress) {
@@ -637,13 +652,25 @@ static int extended_mass_erase(Bootloader *bootloader, int bank) {
         bootloader->print("failed to send extended erase command\n", 0);
         return status;
     }
-    uint8_t buff[5];
-    buff[0] = 0x00;
-    buff[1] = 0x00;
-    buff[2] = 0x00;
-    buff[3] = 0x00;
-    buff[4] = 0x00;
-    transmit_buff(bootloader, buff, 5);
+    uint8_t buff[3];
+    switch (bank) {
+    case EraseOptionGlobal:
+        buff[0] = 0xff;
+        buff[1] = 0xff;
+        buff[2] = 0x00;
+        break;
+    case EraseOptionBank1:
+        buff[0] = 0xff;
+        buff[1] = 0xfe;
+        buff[2] = 0x01;
+        break;
+    case EraseOptionBank2:
+        buff[0] = 0xff;
+        buff[1] = 0xfd;
+        buff[2] = 0x02;
+        break;
+    }
+    transmit_buff(bootloader, buff, 3);
     status = recv_find(bootloader, BootloaderAckByte);
     return status;
 }
@@ -766,17 +793,19 @@ static int write_memory(Bootloader *bootloader, uint32_t address, uint8_t *data,
         return status;
     }
 
-    uint8_t *p = bootloader->data_buffer;
+    uint8_t *src = data;
+    uint8_t *dst = bootloader->data_buffer;
     // memcpy(&p[1], data, n_bytes);
     // data[n_bytes + 1] = record->checksum;
-    *p++ = n_bytes - 1;
-    checksum = data[0];
+    uint8_t byte = n_bytes - 1;
+    *dst++ = byte; /* first byte used to indicate number of bytes */
+    checksum = byte; /* checksum is taken over entire payload, including count */
     for (unsigned int i = 0; i < n_bytes; ++i) {
-        uint8_t byte = data[i];
+        byte = data[i];
         checksum = checksum ^ byte;
-        *p++ = byte;
+        *dst++ = byte;
     }
-    *p++ = checksum;
+    *dst = checksum;
 
     flush_queue(bootloader); /* should not be stragglers, but just in case */
     status = transmit_buff(bootloader, record_address, 5);
@@ -784,7 +813,6 @@ static int write_memory(Bootloader *bootloader, uint32_t address, uint8_t *data,
         printf("failed issue address\n");
         return EXIT_FAILURE;
     }
-
     status = recv_find(bootloader, BootloaderAckByte);
     if (status != EXIT_SUCCESS) {
         printf("failed issue address ack\n");
@@ -792,11 +820,12 @@ static int write_memory(Bootloader *bootloader, uint32_t address, uint8_t *data,
     }
 
     flush_queue(bootloader->rx_queue); /* should not be stragglers, but you can't tell these days */
-    status = transmit_buff(bootloader, data, n_bytes + 2);
+    status = transmit_buff(bootloader, bootloader->data_buffer, n_bytes + 2);
     if (status != EXIT_SUCCESS) { return status; }
     status = recv_find(bootloader, BootloaderAckByte);
     if (status != EXIT_SUCCESS) { return status; }
 
+#if 1
     memset(erase_pages_buff, 0, n_bytes);
     status = bootloader->read_memory(bootloader, address, erase_pages_buff, n_bytes);
     if (status != EXIT_SUCCESS) {
@@ -806,14 +835,15 @@ static int write_memory(Bootloader *bootloader, uint32_t address, uint8_t *data,
 
     checksum = 0; /* hijack for verifying data */
     for (int i = 0; i < n_bytes; ++i) {
-        uint8_t byte = data[i + 1] ^ erase_pages_buff[i];
-        if (byte) { printf("poor you %d. %x vs %x\n", i, data[i+1], erase_pages_buff[i]); }
+        uint8_t byte = data[i] ^ erase_pages_buff[i];
+        if (byte) { printf("poor you %d. %x vs %x\n", i, data[i], erase_pages_buff[i]); }
         checksum = checksum | byte;
     }
 
     if (checksum == 0) {
         printf("wrote and verified memory at address = 0x%8.8x\n", address);
     }
+#endif
 
     if (checksum) { return EXIT_FAILURE; }
 
