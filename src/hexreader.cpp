@@ -148,7 +148,7 @@ int hexreader_next(FILE *fp, BootloaderRecord *work_record, BootloaderRecord *re
 
         } else if (type == ExtendedLinearAddressRecord) {
 
-            if (work_record->dirty && (work_record->size != 0)) { /* TODO is dirty and size != 0 the same criteria */
+            if (work_record->dirty && (work_record->size != 0)) {
                 make_final_record(record, work_record);
             }
 

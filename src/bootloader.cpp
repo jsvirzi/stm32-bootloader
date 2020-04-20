@@ -245,8 +245,8 @@ int main(int argc, char **argv) {
                 bootloader.read_page_size = 256;
             } else if (strcmp(cpu, "stm32h745-m4") == 0) {
                 bootloader.base_address = 0x08100000;
-                bootloader.write_page_size = 32;
-                bootloader.read_page_size = 32;
+                bootloader.write_page_size = 128;
+                bootloader.read_page_size = 128;
             } else if (strcmp(cpu, "stm32h745-m7") == 0) {
                 bootloader.base_address = 0x08000000;
                 bootloader.write_page_size = 32;
