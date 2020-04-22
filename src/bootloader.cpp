@@ -197,6 +197,10 @@ int initialize_bootloader(Bootloader *bootloader) {
     return EXIT_SUCCESS;
 }
 
+/*
+ * -d /dev/ttyUSB5 -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM4/soc_CM4.hex -cpu stm32h745-m4 -erase 0
+ * -d /dev/ttyUSB5 -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM7/soc_CM7.hex -cpu stm32h745-m7
+ */
 int main(int argc, char **argv) {
 
     char device_name[128], hex_filename[256];
@@ -249,13 +253,15 @@ int main(int argc, char **argv) {
                 bootloader.read_page_size = 256;
             } else if (strcmp(cpu, "stm32h745-m7") == 0) {
                 bootloader.base_address = 0x08000000;
-                bootloader.write_page_size = 32;
-                bootloader.read_page_size = 32;
+                bootloader.write_page_size = 256;
+                bootloader.read_page_size = 256;
             }
         } else if (strcmp(argv[i], "-monitor") == 0) {
             monitor = 1;
         }
     }
+
+    /* TODO necessary to provide base address? included in hex file? */
 
     printf("programming %" PRIu32 " bytes with page size = %d. go address = %" PRIu32 "\n",
         flash_size, page_size, go_address);
@@ -359,88 +365,12 @@ int main(int argc, char **argv) {
 
         static uint8_t TODO_debug[128];
         status = bootloader.read_memory(&bootloader, record.address, TODO_debug, sizeof(TODO_debug));
-        status = bootloader.write_memory(&bootloader, record.address, record.payload, record.size);
-
-#if 0
-
-        uint8_t record_address[5]; /* 4 bytes + checksum */
-        uint32_t address = record.segment_address + record.base_address;
-
-        record_address[0] = (address >> 0x18) & 0xff;
-        record_address[1] = (address >> 0x10) & 0xff;
-        record_address[2] = (address >> 0x08) & 0xff;
-        record_address[3] = (address >> 0x00) & 0xff;
-        uint8_t checksum = 0;
-        checksum = checksum ^ record_address[0];
-        checksum = checksum ^ record_address[1];
-        checksum = checksum ^ record_address[2];
-        checksum = checksum ^ record_address[3];
-        record_address[4] = checksum;
-
-        if (mass_erase == EraseOptionInvalid) { /* we did not perform a mass erase, so erase individually each "sector" */
-            unsigned int start_page = (address - bootloader.base_address) / bootloader.erase_page_size;
-            unsigned int pages = 1 + (record.size - 1) / bootloader.erase_page_size;
-            int status = bootloader.extended_erase(&bootloader, start_page, pages);
-            if (status != EXIT_SUCCESS) {
-                printf("failed erase\n");
-                return status;
+        for (int i = 0; i < sizeof(TODO_debug); ++i) {
+            if (TODO_debug[i] != 0xff) {
+                printf("erasing failed at address = 0x%x\n", record.address);
             }
         }
-
-        /* at this point all systems are a go */
-        printf("loading memory at %8.8x size = %d\n", record.base_address, record.size);
-        status = send_command(&bootloader, BootloaderWriteMemory);
-        if (status != EXIT_SUCCESS) {
-            printf("failed issue command\n");
-            return status;
-        }
-
-        uint8_t data[258];
-        data[record.size + 1] = record.checksum;
-        data[0] = record.size - 1;
-        memcpy(&data[1], record.payload, record.size);
-
-        flush_queue(bootloader.rx_queue); /* straggler acks */
-        status = transmit_buff(&bootloader, record_address, 5);
-        if (status != EXIT_SUCCESS) {
-            printf("failed issue address\n");
-            return status;
-        }
-
-        status = recv_find(&bootloader, BootloaderAckByte);
-        if (status != EXIT_SUCCESS) {
-            printf("failed issue address ack\n");
-            return status;
-        }
-
-        flush_queue(bootloader.rx_queue); /* straggler acks */
-        status = transmit_buff(&bootloader, data, record.size + 2);
-        if (status != EXIT_SUCCESS) { return status; }
-        status = recv_find(&bootloader, BootloaderAckByte);
-        if (status != EXIT_SUCCESS) { return status; }
-
-        memset(erase_pages_buff, 0, record.size);
-        status = bootloader.read_memory(&bootloader, address, erase_pages_buff, record.size);
-        if (status != EXIT_SUCCESS) {
-            printf("failed to read memory at address = 0x%8.8x\n", address);
-            return status;
-        }
-
-        checksum = 0; /* hijack for verifying data */
-        for (int i = 0; i < record.size; ++i) {
-            uint8_t byte = data[i + 1] ^ erase_pages_buff[i];
-            if (byte) { printf("poor you %d. %x vs %x\n", i, data[i+1], erase_pages_buff[i]); }
-            checksum = checksum | byte;
-        }
-
-        if (checksum == 0) {
-            printf("wrote and verified memory at address = 0x%8.8x\n", address);
-        }
-
-        if (checksum) { return EXIT_FAILURE; }
-
-#endif
-
+        status = bootloader.write_memory(&bootloader, record.address, record.payload, record.size);
     }
 
     if (go_address != InvalidAddress) {
@@ -652,6 +582,8 @@ static int extended_mass_erase(Bootloader *bootloader, int bank) {
         bootloader->print("failed to send extended erase command\n", 0);
         return status;
     }
+    flush_queue(bootloader);
+
     uint8_t buff[3];
     switch (bank) {
     case EraseOptionGlobal:
@@ -670,7 +602,12 @@ static int extended_mass_erase(Bootloader *bootloader, int bank) {
         buff[2] = 0x02;
         break;
     }
-    transmit_buff(bootloader, buff, 3);
+    status = transmit_buff(bootloader, buff, 3);
+    if (status != EXIT_SUCCESS) {
+        printf("extended_mass_erase(%d). error sending options\n", bank);
+        return EXIT_FAILURE;
+    }
+
     status = recv_find(bootloader, BootloaderAckByte);
     return status;
 }
