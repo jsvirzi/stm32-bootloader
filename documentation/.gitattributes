@@ -1,0 +1,2 @@
+an2606-system-boot-mode.pdf filter=lfs diff=lfs merge=lfs -text
+an3155-serial-bootloader-protocol.pdf filter=lfs diff=lfs merge=lfs -text
