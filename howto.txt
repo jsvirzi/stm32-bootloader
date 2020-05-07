@@ -1,3 +1,5 @@
+dev0=${1}
+dev1=${2}
 # build
     mkdir build
     cd build
@@ -5,5 +7,8 @@
     make
 
 # execution
-./bootload -d /dev/ttyUSB5 -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM4/soc_CM4.hex -cpu stm32h745-m4 -erase 0
-./bootload -d /dev/ttyUSB5 -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM7/soc_CM7.hex -cpu stm32h745-m7
+/home/jsvirzi/projects/nauto-prototype/n3-stm/support/reset/reset -boot 1 -d /dev/ttyUSB${dev0}
+./bootload -d /dev/ttyUSB${dev1} -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM4/soc_CM4.hex -cpu stm32h745-m4 -erase 0
+/home/jsvirzi/projects/nauto-prototype/n3-stm/support/reset/reset -boot 1 -d /dev/ttyUSB${dev0}
+./bootload -d /dev/ttyUSB${dev1} -i /home/jsvirzi/projects/nauto-prototype/n3-stm/firmware/soc/Debug_CM7/soc_CM7.hex -cpu stm32h745-m7
+/home/jsvirzi/projects/nauto-prototype/n3-stm/support/reset/reset -boot 0 -d /dev/ttyUSB${dev0}
