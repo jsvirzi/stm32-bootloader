@@ -210,7 +210,8 @@ int main(int argc, char **argv) {
     uint32_t flash_size = 0x10000;
     uint16_t page_size = 128;
     int mass_erase = EraseOptionInvalid;
-    uint8_t monitor = 0;
+    unsigned int monitor = 0;
+    unsigned int wait = 0;
 
     Bootloader bootloader;
     memset(&bootloader, 0, sizeof(Bootloader));
@@ -240,6 +241,8 @@ int main(int argc, char **argv) {
             sscanf(argv[++i], "%x", &read_address);
         } else if (strcmp(argv[i], "-erase") == 0) {
             mass_erase = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "-wait") == 0) {
+            wait = 1;
         } else if (strcmp(argv[i], "-cpu") == 0) {
             const char *cpu = argv[++i];
             if (strcmp(cpu, "stm32l051") == 0) {
@@ -303,9 +306,13 @@ int main(int argc, char **argv) {
 
     printf("open serial port. fd = %d\n", bootloader.fd);
 
-    printf("set up BOOTSEL = 1 and toggle RESET...\n");
-    getchar();
-    printf("start bootload\n");
+    if (wait) {
+        printf("set up BOOTSEL = 1 and toggle RESET...\n");
+        getchar();
+        printf("start bootload\n");
+    } else {
+        sleep(2);
+    }
 
     bootloader.serial_timeout_ms = 10000; /* long time TODO */
 
